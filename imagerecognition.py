@@ -21,11 +21,12 @@ from pybrain.utilities           import percentError
 from pybrain.tools.shortcuts     import buildNetwork
 from pybrain.supervised.trainers import BackpropTrainer
 from pybrain.structure.modules   import SoftmaxLayer
-from pybrain.tools.customxml import NetworkWriter
-from pybrain.tools.customxml import NetworkReader
+from pybrain.tools.xml import NetworkWriter
+from pybrain.tools.xml import NetworkReader
 from pylab import ion, ioff, figure, draw, contourf, clf, show, hold, plot
 from scipy import diag, arange, meshgrid, where
 from numpy.random import multivariate_normal
+from pybrain.structure import SimpleConvolutionalNetwork
 # Using pickle
 
 
@@ -42,29 +43,43 @@ def loadnet(net):
 #x=pd.read_csv("C:\\Users\\hardy_000\\Downloads\\train.csv")
 def showpixel(i):
     
-    b=np.reshape(x.iloc[i,1:],(-1,28))
+    b=np.reshape(x[i,:],(-1,28))
     imshow(b,cmap='Greys')
-    print "label " + str(x.loc[i,'label'])
+    print "label " + str(y[i])
 def getPercentError(data):
-    percentError(trainer.testOnClassData(dataset=data),data['class'])
-def loaddata():
+    return percentError(trainer.testOnClassData(dataset=data),data['class'])
+def loadtraindata():
     z= pd.read_csv("C:\\Users\\hardy_000\\Downloads\\train.csv")
     pixels=z.drop('label',1)
     pixels=pixels.as_matrix()
-    print len(pixels)
+    pixels=pixels/255
     targets=z['label'].as_matrix().reshape(-1,1)
-    return targets, pixels
+    z=ds.classification.ClassificationDataSet(784,1,nb_classes=10)
+    z.setField('input', pixels)
+    z.setField('target', targets)
+    z._convertToOneOfMany( )
+    return z
+    
+def loadtestdata():
+    z= pd.read_csv("C:\\Users\\hardy_000\\Downloads\\train.csv")
+    pixels=z.drop('label',1)
+    pixels=pixels.as_matrix()
+    pixels=pixels/255
+    
+    targets=z['label'].as_matrix().reshape(-1,1)
+    z=ds.classification.ClassificationDataSet(784,1,nb_classes=10)
+    z.setField('input', pixels)
+    z.setField('target', targets)
+    z._convertToOneOfMany( )
+    return z
 
 
-y,x=loaddata()
-z=ds.classification.ClassificationDataSet(784,nb_classes=10)
+z=loadtraindata()
 
-z.setField('input', x)
-z.setField('target', y)
 #following linke seems to be necessary to fill class field of dataset
-z._convertToOneOfMany( )
+
 fnn = buildNetwork( z.indim, 300, z.outdim, outclass=SoftmaxLayer )
 trainer = BackpropTrainer( fnn, dataset=z, momentum=0.1, 
                           verbose=True, weightdecay=0.01,learningrate=0.01,lrdecay=1)
-
-
+                          
+trainer.trainEpochs(1)
