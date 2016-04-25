@@ -7,12 +7,14 @@ Created on Thu Apr 21 17:55:19 2016
 import numpy as np
 import sklearn as sk
 from sklearn import datasets
+from sklearn import linear_model
 import matplotlib.pyplot as plt
 import math
 
 
 np.random.seed(0)
 X, y = sk.datasets.make_moons(200, noise=0.20)
+
 X=X.T
 y=y.reshape(-1,1)
 num_examples = len(X.T) # training set size
@@ -21,7 +23,7 @@ nn_output_dim = 1 # output layer dimensionality
  
 # Gradient descent parameters (I picked these by hand)
 epsilon = 0.01 # learning rate for gradient descent
-reg_lambda = 0.01 # regularization strength
+reg_lambda =0 # regularization strength
 
 
 
@@ -43,12 +45,12 @@ def predict(model, x):
     a2,z2=propagateForward(x.T,W1)
     a3,z3=propagateForward(a2,W2)
    
-    return np.around(a3, decimals=0)
+    return a3
 
 def propagateForward(x,w):
         ##insert column of 1s
-        x=np.insert(x, 0, 1, axis=0)
-        z = np.dot(w,x)
+        
+        z = np.dot(w,np.insert(x, 0, 1, axis=0))
         a = sigmoid(z)
         return a,z
 # This function learns parameters for the neural network and returns the model.
@@ -58,9 +60,9 @@ def propagateForward(x,w):
 def build_model(nn_hdim, num_passes=20000, print_loss=False):
      
     # Initialize the parameters to random values. We need to learn these.
-    np.random.seed(0)
-    W1 = np.random.randn(nn_hdim,nn_input_dim+1) / np.sqrt(nn_input_dim)
-    W2 = np.random.randn(nn_output_dim,nn_hdim+1) / np.sqrt(nn_hdim)
+    np.random.seed(3)
+    W1 = 2*np.random.rand(nn_hdim,nn_input_dim+1)-1
+    W2 = 2*np.random.rand(nn_output_dim,nn_hdim+1)-1
 
 
     # This is what we return at the end
@@ -78,10 +80,10 @@ def build_model(nn_hdim, num_passes=20000, print_loss=False):
         delta3 = a3-y.T
         a2=np.insert(a2, 0, 1, axis=0)
         a1=np.insert(a1, 0, 1, axis=0)
-        delta2=np.dot(W2.T,delta3)*a2*(1-a2)
+        delta2=np.dot(W2.T,delta3)*(a2*(1.-a2))
         
-        dW2=(1./num_examples)*(delta3).dot(a2.T)
-        dW1=(1./num_examples)*(delta2[1:]).dot(a1.T)
+        dW2=np.dot(delta3,a2.T)
+        dW1=np.dot(delta2[1:],a1.T)
         # Add regularization terms (b1 and b2 don't have regularization terms)
         dW2[:,1:] += reg_lambda * W2[:,1:]
         dW1[:,1:] += reg_lambda * W1[:,1:]
@@ -108,22 +110,27 @@ def plot_decision_boundary(pred_func):
     # Generate a grid of points with distance h between them
     xx, yy = np.meshgrid(np.arange(x_min, x_max, h), np.arange(y_min, y_max, h))
     # Predict the function value for the whole gid
-    print np.c_[xx.ravel(), yy.ravel()]
+    
+    arg=np.c_[xx.ravel(),yy.ravel()]
     Z = pred_func(np.c_[xx.ravel(), yy.ravel()])
+    print arg 
+    print Z
     Z = Z.reshape(xx.shape)
     
     # Plot the contour and training examples
-    plt.contourf(xx, yy, Z, cmap=plt.cm.Spectral)
-    plt.scatter(X.T[:, 0], X.T[:, 1], c=y.reshape(-1), cmap=plt.cm.Spectral)
+    plt.contourf(xx, yy, Z, cmap=plt.cm.bone)
+    plt.scatter(X.T[:, 0], X.T[:, 1], c=y.reshape(-1), cmap=plt.cm.bone)
     
 def sigmoid(x):
-  return 1 / (1 + math.exp(-x))   
+  return 1. / (1. + math.exp(-x))   
 
 sigmoid=np.vectorize(sigmoid)
 model = build_model(3, print_loss=True)
 print model['W1']
 print model['W2']
-predict(model,np.array([2,0]))
+predict(model,np.array([-2,-2]))
+a,z=propagateForward(np.array([1,1]),np.array([1,1,-2]).T)
+a2,z2=propagateForward(a,model['W2'])
 # Plot the decision boundary
 plot_decision_boundary(lambda x: predict(model, x))
 plt.title("Decision Boundary for hidden layer size 3")
