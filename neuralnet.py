@@ -4,13 +4,18 @@ Created on Thu Apr 21 17:55:19 2016
 
 @author: hardy_000
 """
+
+##base code taken from http://www.wildml.com/2015/09/implementing-a-neural-network-from-scratch/
+
+##modified to use sigmoid activation function and also to incorporate offset into weight matrices.
+
 import numpy as np
 import sklearn as sk
 from sklearn import datasets
 from sklearn import linear_model
 import matplotlib.pyplot as plt
 import math
-
+import pandas as pd
 
 np.random.seed(0)
 X, y = sk.datasets.make_moons(200, noise=0.20)
@@ -19,12 +24,17 @@ X=X.T
 y=y.reshape(-1,1)
 num_examples = len(X.T) # training set size
 nn_input_dim = 2 # input layer dimensionality
-nn_output_dim = 1 # output layer dimensionality
- 
+nn_output_dim = 2 # output layer dimensionality
+#changes from single output to multicolumn
+yvec=np.zeros(((num_examples,pd.unique(y).size)))
+for i in range(num_examples):
+    yvec[i][y[i]]=1
+
+    
 # Gradient descent parameters (I picked these by hand)
 epsilon = 0.01 # learning rate for gradient descent
 reg_lambda =0 # regularization strength
-
+num_classes=2
 
 
 
@@ -37,15 +47,15 @@ def calculate_loss(model):
     
     # Calculating the loss
     
-    return (1./num_examples)*sum(sum((np.square(y.T-a3))))
+    return (1./num_examples)*sum(sum((np.square(yvec.T-a3))))
     
 def predict(model, x):
     W1, W2= model['W1'], model['W2']
     # Forward propagation
     a2,z2=propagateForward(x.T,W1)
     a3,z3=propagateForward(a2,W2)
-   
-    return a3
+    
+    return np.argmax(a3,axis=0)
 
 def propagateForward(x,w):
         ##insert column of 1s
@@ -77,7 +87,7 @@ def build_model(nn_hdim, num_passes=20000, print_loss=False):
         a3,z3=propagateForward(a2,W2)
  
         # Backpropagation
-        delta3 = a3-y.T
+        delta3 = a3-yvec.T
         a2=np.insert(a2, 0, 1, axis=0)
         a1=np.insert(a1, 0, 1, axis=0)
         delta2=np.dot(W2.T,delta3)*(a2*(1.-a2))
@@ -111,21 +121,27 @@ def plot_decision_boundary(pred_func):
     xx, yy = np.meshgrid(np.arange(x_min, x_max, h), np.arange(y_min, y_max, h))
     # Predict the function value for the whole gid
     
-    arg=np.c_[xx.ravel(),yy.ravel()]
     Z = pred_func(np.c_[xx.ravel(), yy.ravel()])
-    print arg 
-    print Z
+
     Z = Z.reshape(xx.shape)
     
     # Plot the contour and training examples
     plt.contourf(xx, yy, Z, cmap=plt.cm.bone)
-    plt.scatter(X.T[:, 0], X.T[:, 1], c=y.reshape(-1), cmap=plt.cm.bone)
+    plt.scatter(X.T[:, 0], X.T[:, 1], c=y.reshape(-1,1), cmap=plt.cm.bone)
     
 def sigmoid(x):
-  return 1. / (1. + math.exp(-x))   
+  return 1. / (1. + math.exp(-x))  
+  
+def loadtraindata():
+    z= pd.read_csv("C:\\Users\\hardy_000\\Downloads\\train.csv")
+    pixels=z.drop('label',1)
+    pixels=pixels.as_matrix()
+    pixels=pixels/255
+    targets=z['label'].as_matrix().reshape(-1,1)
+    return pixels,targets
 
 sigmoid=np.vectorize(sigmoid)
-model = build_model(3, print_loss=True)
+model = build_model(6, print_loss=True)
 print model['W1']
 print model['W2']
 predict(model,np.array([-2,-2]))

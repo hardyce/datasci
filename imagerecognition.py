@@ -48,12 +48,13 @@ def showpixel(i):
     print "label " + str(y[i])
 def getPercentError(data):
     return percentError(trainer.testOnClassData(dataset=data),data['class'])
+    
 def loadtraindata():
     z= pd.read_csv("C:\\Users\\hardy_000\\Downloads\\train.csv")
     pixels=z.drop('label',1)
     pixels=pixels.as_matrix()
     pixels=pixels/255
-    targets=z['label'].as_matrix().reshape(-1,1)
+    targets=z['label'].as_matrix().resshape(-1,1)
     z=ds.classification.ClassificationDataSet(784,1,nb_classes=10)
     z.setField('input', pixels)
     z.setField('target', targets)
