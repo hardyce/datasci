@@ -32,7 +32,7 @@ for i in range(num_examples):
 
     
 # Gradient descent parameters (I picked these by hand)
-epsilon = 0.01 # learning rate for gradient descent
+ # learning rate for gradient descent
 reg_lambda =0 # regularization strength
 num_classes=2
 
@@ -68,7 +68,7 @@ def propagateForward(x,w):
 # - num_passes: Number of passes through the training data for gradient descent
 # - print_loss: If True, print the loss every 1000 iterations
 def build_model(nn_hdim, num_passes=20000, print_loss=False):
-     
+    epsilon=0.01
     # Initialize the parameters to random values. We need to learn these.
     np.random.seed(3)
     W1 = 2*np.random.rand(nn_hdim,nn_input_dim+1)-1
@@ -80,12 +80,20 @@ def build_model(nn_hdim, num_passes=20000, print_loss=False):
      
     # Gradient descent. For each batch...
     for i in xrange(0, num_passes):
- 
+        lossPrev=1000
         # Forward propagation
         a1=X
         a2,z2=propagateForward(a1,W1)
         a3,z3=propagateForward(a2,W2)
- 
+        loss=(1./num_examples)*sum(sum(np.power(a3-yvec.T,2)))
+        
+        if loss<lossPrev:
+            epsilon=min(epsilon*1.001,0.05)
+        else:
+
+            epsilon=epsilon*0.5
+
+        lossPrev=loss
         # Backpropagation
         delta3 = a3-yvec.T
         a2=np.insert(a2, 0, 1, axis=0)
@@ -109,6 +117,7 @@ def build_model(nn_hdim, num_passes=20000, print_loss=False):
         # This is expensive because it uses the whole dataset, so we don't want to do it too often.
         if print_loss and i % 1000 == 0:
           print "Loss after iteration %i: %f" %(i, calculate_loss(model))
+          print loss
      
     return model
     
@@ -130,7 +139,7 @@ def plot_decision_boundary(pred_func):
     plt.scatter(X.T[:, 0], X.T[:, 1], c=y.reshape(-1,1), cmap=plt.cm.bone)
     
 def sigmoid(x):
-  return 1. / (1. + math.exp(-x))  
+  return 0.5*(np.tanh(0.5*x)+1)  
   
 def loadtraindata():
     z= pd.read_csv("C:\\Users\\hardy_000\\Downloads\\train.csv")
