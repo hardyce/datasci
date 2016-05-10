@@ -16,25 +16,10 @@ from sklearn import linear_model
 import matplotlib.pyplot as plt
 import math
 import pandas as pd
+from sklearn import utils
+from itertools import izip
 
-np.random.seed(0)
-X, y = sk.datasets.make_moons(200, noise=0.20)
 
-X=X.T
-y=y.reshape(-1,1)
-num_examples = len(X.T) # training set size
-nn_input_dim = 2 # input layer dimensionality
-nn_output_dim = 2 # output layer dimensionality
-#changes from single output to multicolumn
-yvec=np.zeros(((num_examples,pd.unique(y).size)))
-for i in range(num_examples):
-    yvec[i][y[i]]=1
-
-    
-# Gradient descent parameters (I picked these by hand)
- # learning rate for gradient descent
-reg_lambda =0 # regularization strength
-num_classes=2
 
 
 
@@ -45,9 +30,43 @@ def calculate_loss(model):
     a2,z2=propagateForward(X,W1)
     a3,z3=propagateForward(a2,W2)
     
-    # Calculating the loss
-    
     return (1./num_examples)*sum(sum((np.square(yvec.T-a3))))
+    
+    # Calculating the loss
+def getGradients(x,y,W1,W2):
+        lossPrev=1000
+        # Forward propagation
+        a1=x
+        
+        y=y.T
+        print "fwd"
+        a2,z2=propagateForward(a1,W1)
+        a3,z3=propagateForward(a2,W2)
+        
+            
+            #if loss<lossPrev:
+            #    epsilon=min(epsilon*1.001,0.05)
+            #else:
+
+            #    epsilon=epsilon*0.5
+
+            #lossPrev=loss
+        
+            # Backpropagation
+        print "bwd"
+        delta3 = a3-y.T
+        a2=np.insert(a2, 0, 1, axis=0)
+        a1=np.insert(a1, 0, 1, axis=0)
+        delta2=np.dot(W2.T,delta3)*(a2*(1.-a2))
+        
+        dW2=np.dot(delta3,a2.T)
+        dW1=np.dot(delta2[1:],a1.T)
+            # Add regularization terms (b1 and b2 don't have regularization terms)
+        return dW1,dW2
+                
+def grouper(iterable, n):
+    args = [iter(iterable)] * n
+    return izip(*args)  
     
 def predict(model, x):
     W1, W2= model['W1'], model['W2']
@@ -67,59 +86,53 @@ def propagateForward(x,w):
 # - nn_hdim: Number of nodes in the hidden layer
 # - num_passes: Number of passes through the training data for gradient descent
 # - print_loss: If True, print the loss every 1000 iterations
-def build_model(nn_hdim, num_passes=20000, print_loss=False):
-    epsilon=0.01
+def build_model(X,nn_input_dim,nn_hdim,nn_output_dim, num_passes=1,miniBatchSize=5,epsilon=0.1):
+    epsilon=0.1
+    epsilonInit=epsilon
     # Initialize the parameters to random values. We need to learn these.
     np.random.seed(3)
     W1 = 2*np.random.rand(nn_hdim,nn_input_dim+1)-1
     W2 = 2*np.random.rand(nn_output_dim,nn_hdim+1)-1
-
-
+    lossarray=np.zeros((1,2))
+    c=num_passes*200
     # This is what we return at the end
     model = {}
-     
+    
+    iteration=0
     # Gradient descent. For each batch...
     for i in xrange(0, num_passes):
-        lossPrev=1000
-        # Forward propagation
-        a1=X
-        a2,z2=propagateForward(a1,W1)
-        a3,z3=propagateForward(a2,W2)
-        loss=(1./num_examples)*sum(sum(np.power(a3-yvec.T,2)))
-        
-        if loss<lossPrev:
-            epsilon=min(epsilon*1.001,0.05)
-        else:
-
-            epsilon=epsilon*0.5
-
-        lossPrev=loss
-        # Backpropagation
-        delta3 = a3-yvec.T
-        a2=np.insert(a2, 0, 1, axis=0)
-        a1=np.insert(a1, 0, 1, axis=0)
-        delta2=np.dot(W2.T,delta3)*(a2*(1.-a2))
-        
-        dW2=np.dot(delta3,a2.T)
-        dW1=np.dot(delta2[1:],a1.T)
-        # Add regularization terms (b1 and b2 don't have regularization terms)
-        dW2[:,1:] += reg_lambda * W2[:,1:]
-        dW1[:,1:] += reg_lambda * W1[:,1:]
- 
-        # Gradient descent parameter update
-        W1 += -epsilon * dW1
-        W2 += -epsilon * dW2
          
-        # Assign new parameters to the model
-        model = { 'W1': W1, 'W2': W2}
+        trainingExamplesX,trainingExamplesy=utils.shuffle(X.T,yvec)
+        
+        for x,y in zip(grouper(trainingExamplesX,miniBatchSize),grouper(trainingExamplesy,miniBatchSize)):
+            y=np.array(y)
+            x=np.array(x)
+            print "get gradients"
+            dW1,dW2=getGradients(x.T,y.T,W1,W2)
+            dW2[:,1:] += reg_lambda * W2[:,1:]
+            dW1[:,1:] += reg_lambda * W1[:,1:]
+            # Gradient descent parameter update
+            epsilon=epsilonInit/(1.+(iteration/c))
+            W1 += -epsilon * dW1*(1./len(y))
+            W2 += -epsilon * dW2*(1./len(y))
          
-        # Optionally print the loss.
-        # This is expensive because it uses the whole dataset, so we don't want to do it too often.
-        if print_loss and i % 1000 == 0:
-          print "Loss after iteration %i: %f" %(i, calculate_loss(model))
-          print loss
-     
-    return model
+            # Assign new parameters to the model
+            model = { 'W1': W1, 'W2': W2}
+            iteration=iteration+1
+            if iteration%1000==0:
+                print iteration
+                lossarray=np.vstack([lossarray,[iteration,calculate_loss(model)]])
+            
+            # Optionally print the loss.
+            # This is expensive because it uses the whole dataset, so we don't want to do it too often.
+        
+            
+    axes = plt.gca()        
+    axes.set_xlim([0,iteration])
+    axes.set_ylim([0,1])
+    plt.plot(lossarray[1:,0],lossarray[1:,1])
+    plt.show()
+    return model,lossarray
     
 def plot_decision_boundary(pred_func):
     # Set min and max values and give it some padding
@@ -149,15 +162,35 @@ def loadtraindata():
     targets=z['label'].as_matrix().reshape(-1,1)
     return pixels,targets
 
+np.random.seed(0)
+#X, y = sk.datasets.make_moons(200, noise=0.20)
+X,y=loadtraindata()
+X=X.T
+y=y.reshape(-1,1)
+num_examples = len(X.T) # training set size
+num_vars=len(X)
+ # output layer dimensionality
+#changes from single output to multicolumn
+yvec=np.zeros(((num_examples,pd.unique(y).size)))
+for i in range(num_examples):
+    yvec[i][y[i]]=1
+
+    
+# Gradient descent parameters (I picked these by hand)
+ # learning rate for gradient descent
+reg_lambda =0 # regularization strength
+num_classes=2
 sigmoid=np.vectorize(sigmoid)
-model = build_model(6, print_loss=True)
-print model['W1']
-print model['W2']
+print "Building network"
+print "input"
+print num_vars
+model,la = build_model(X,num_vars,300,nn_output_dim=10,miniBatchSize=5,epsilon=0.1)
+
 predict(model,np.array([-2,-2]))
 a,z=propagateForward(np.array([1,1]),np.array([1,1,-2]).T)
 a2,z2=propagateForward(a,model['W2'])
 # Plot the decision boundary
-plot_decision_boundary(lambda x: predict(model, x))
-plt.title("Decision Boundary for hidden layer size 3")
+#plot_decision_boundary(lambda x: predict(model, x))
+#plt.title("Decision Boundary for hidden layer size 3")
 # Train the logistic rgeression classifier
 
