@@ -34,12 +34,11 @@ def calculate_loss(model):
     
     # Calculating the loss
 def getGradients(x,y,W1,W2):
-        lossPrev=1000
+        #lossPrev=1000
         # Forward propagation
         a1=x
         
         y=y.T
-        print "fwd"
         a2,z2=propagateForward(a1,W1)
         a3,z3=propagateForward(a2,W2)
         
@@ -53,7 +52,6 @@ def getGradients(x,y,W1,W2):
             #lossPrev=loss
         
             # Backpropagation
-        print "bwd"
         delta3 = a3-y.T
         a2=np.insert(a2, 0, 1, axis=0)
         a1=np.insert(a1, 0, 1, axis=0)
@@ -87,14 +85,14 @@ def propagateForward(x,w):
 # - num_passes: Number of passes through the training data for gradient descent
 # - print_loss: If True, print the loss every 1000 iterations
 def build_model(X,nn_input_dim,nn_hdim,nn_output_dim, num_passes=1,miniBatchSize=5,epsilon=0.1):
-    epsilon=0.1
+    lossarray=np.zeros(shape=(1,2))
     epsilonInit=epsilon
     # Initialize the parameters to random values. We need to learn these.
     np.random.seed(3)
     W1 = 2*np.random.rand(nn_hdim,nn_input_dim+1)-1
     W2 = 2*np.random.rand(nn_output_dim,nn_hdim+1)-1
-    lossarray=np.zeros((1,2))
-    c=num_passes*200
+    #constant for annealing step size
+    c=num_passes*(200/miniBatchSize)
     # This is what we return at the end
     model = {}
     
@@ -105,9 +103,10 @@ def build_model(X,nn_input_dim,nn_hdim,nn_output_dim, num_passes=1,miniBatchSize
         trainingExamplesX,trainingExamplesy=utils.shuffle(X.T,yvec)
         
         for x,y in zip(grouper(trainingExamplesX,miniBatchSize),grouper(trainingExamplesy,miniBatchSize)):
+            
             y=np.array(y)
             x=np.array(x)
-            print "get gradients"
+            
             dW1,dW2=getGradients(x.T,y.T,W1,W2)
             dW2[:,1:] += reg_lambda * W2[:,1:]
             dW1[:,1:] += reg_lambda * W1[:,1:]
@@ -119,9 +118,8 @@ def build_model(X,nn_input_dim,nn_hdim,nn_output_dim, num_passes=1,miniBatchSize
             # Assign new parameters to the model
             model = { 'W1': W1, 'W2': W2}
             iteration=iteration+1
-            if iteration%1000==0:
-                print iteration
-                lossarray=np.vstack([lossarray,[iteration,calculate_loss(model)]])
+            
+            lossarray=np.vstack([lossarray,[iteration,calculate_loss(model)]])
             
             # Optionally print the loss.
             # This is expensive because it uses the whole dataset, so we don't want to do it too often.
@@ -161,34 +159,37 @@ def loadtraindata():
     pixels=pixels/255
     targets=z['label'].as_matrix().reshape(-1,1)
     return pixels,targets
+def vectorize(y,numexamples):
+    yvec=np.zeros(((numexamples,pd.unique(y).size)))
+    for i in range(numexamples):
+        yvec[i][y[i]]=1
+    return yvec
 
 np.random.seed(0)
-#X, y = sk.datasets.make_moons(200, noise=0.20)
-X,y=loadtraindata()
+X, y = sk.datasets.make_moons(200, noise=0.20)
+#X,y=loadtraindata()
 X=X.T
 y=y.reshape(-1,1)
 num_examples = len(X.T) # training set size
-num_vars=len(X)
+num_vars=len(X)#number of parameters
  # output layer dimensionality
 #changes from single output to multicolumn
-yvec=np.zeros(((num_examples,pd.unique(y).size)))
-for i in range(num_examples):
-    yvec[i][y[i]]=1
+yvec=vectorize(y,num_examples)
+
 
     
 # Gradient descent parameters (I picked these by hand)
  # learning rate for gradient descent
 reg_lambda =0 # regularization strength
-num_classes=2
 sigmoid=np.vectorize(sigmoid)
 print "Building network"
 print "input"
 print num_vars
-model,la = build_model(X,num_vars,300,nn_output_dim=10,miniBatchSize=5,epsilon=0.1)
+model,la = build_model(X,num_vars,300,nn_output_dim=2,miniBatchSize=5,epsilon=0.01)
 
-predict(model,np.array([-2,-2]))
-a,z=propagateForward(np.array([1,1]),np.array([1,1,-2]).T)
-a2,z2=propagateForward(a,model['W2'])
+#predict(model,np.array([-2,-2]))
+#a,z=propagateForward(np.array([1,1]),np.array([1,1,-2]).T)
+#a2,z2=propagateForward(a,model['W2'])
 # Plot the decision boundary
 #plot_decision_boundary(lambda x: predict(model, x))
 #plt.title("Decision Boundary for hidden layer size 3")
