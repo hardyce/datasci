@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import matplotlib as mpl
 from mpl_toolkits.mplot3d import Axes3D
+from sklearn import neighbors, datasets
 
 def loadtraindata():
     z= pd.read_csv("C:\\Users\\hardy_000\\fbcomp\\train.csv")
@@ -97,5 +98,10 @@ ax = fig.add_subplot(111, projection='3d')
 plt.xlabel('x')
 plt.ylabel('y')
 ax.set_zlabel('time')
-ax.scatter(sample.x,sample.y,sample.time,c=cols,marker='o',depthshade=False,lw = 0)
-
+ax.scatter(normalize(sample.x),normalize(sample.y),normalize(sample.time),c=cols,marker='o',depthshade=False,lw = 0)
+plt.show()
+data=train.drop('place_id',1)
+data=data.drop('accuracy',1)
+data=data.drop('row_id',1)
+clf = neighbors.KNeighborsClassifier(5)
+clf.fit(data, train.place_id)
