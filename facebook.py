@@ -10,6 +10,8 @@ import numpy as np
 import matplotlib as mpl
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn import neighbors, datasets
+from sklearn.neighbors import NearestNeighbors
+
 
 def loadtraindata():
     z= pd.read_csv("C:\\Users\\hardy_000\\fbcomp\\train.csv")
@@ -33,7 +35,22 @@ def discrete_cmap(N, base_cmap=None):
     cmap_name = base.name + str(N)
     return base.from_list(cmap_name, color_list, N)
     
+def getSquare(data,i,j):
+    data=data[(j-1)<data['y']]
+    data=data[data['y']<j]
+    data=data[(i-1)<data['x']]
+    data=data[data['x']<i]
+    return data
 
+def plot3DScatter(data):
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    ax.set_zlabel('time')
+    ax.scatter(normalize(data.x),normalize(data.y),normalize(data.time),c=data.place_id,marker='o',depthshade=False,lw = 0)
+    plt.show()
 #places=train.groupby('place_id')
 #meanplaces=places.mean()
 #meanplaces=meanplaces.reset_index(drop=False)
@@ -100,8 +117,30 @@ plt.ylabel('y')
 ax.set_zlabel('time')
 ax.scatter(normalize(sample.x),normalize(sample.y),normalize(sample.time),c=cols,marker='o',depthshade=False,lw = 0)
 plt.show()
-data=train.drop('place_id',1)
+
+#kmeans starts here
+train['time']=normalize(train['time'])
+#train=train.drop('time',1)
+traintrain=train[0:14559010]
+small=getSquare(traintrain,1,1)
+#nd=normalize(small['accuracy'])
+#small=small[nd<0.1]
+cla=small.place_id
+data=small.drop('place_id',1)
 data=data.drop('accuracy',1)
 data=data.drop('row_id',1)
 clf = neighbors.KNeighborsClassifier(5)
-clf.fit(data, train.place_id)
+NearestNeighbors
+ft=clf.fit(data, cla)
+traintest=train[14559011:]
+traintest=traintest.drop('accuracy',1)
+traintest=traintest.drop('row_id',1)
+traintiny=getSquare(traintest,1,1)
+seek=traintiny['place_id']
+traintiny=traintiny.drop('place_id',1)
+res=clf.predict(traintiny)
+bol=(res==seek)
+fin=(1./bol.size)*sum(bol)
+##may want to link accuracy to below somehow
+nbrs=NearestNeighbors(5,algorithm='ball_tree').fit(data)
+distances,indices=nbrs.kneighbors(traintiny)
