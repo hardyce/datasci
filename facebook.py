@@ -14,6 +14,12 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn import cross_validation
 from sklearn.metrics import pairwise
 from scipy.spatial import distance
+import scipy as sp
+import sklearn as skl
+from collections import Counter
+
+
+fw = [500, 1000, 4, 3, 2, 10] 
 
 def loadtraindata():
     z= pd.read_csv("C:\\Users\\hardy_000\\fbcomp\\train.csv")
@@ -37,13 +43,34 @@ def discrete_cmap(N, base_cmap=None):
     cmap_name = base.name + str(N)
     return base.from_list(cmap_name, color_list, N)
     
-def getSquare(data,i,j):
-    data=data[(j-1)<data['y']]
-    data=data[data['y']<j]
-    data=data[(i-1)<data['x']]
-    data=data[data['x']<i]
-    return data
+def convertTime(df):
+    df['x']=df['x']*fw[0]
+    df['y']=df['y']*fw[1]
+    
+    initial_date = np.datetime64('2014-01-01T01:01', dtype='datetime64[m]')
+    d_times = pd.DatetimeIndex(initial_date + np.timedelta64(int(mn), 'm') 
+                               for mn in df.time.values)    
+    df['hour'] = (d_times.hour+ d_times.minute/60) * fw[2]
+    df['weekday'] = d_times.weekday * fw[3]
+    df['month'] = d_times.month * fw[4]
+    df['year'] = (d_times.year - 2013) * fw[5]
 
+    df = df.drop(['time'], axis=1) 
+    return df
+    
+def getSquare(data,i,j,buff):
+    data=data[((((j-1-buff)<=data['y']) & (data['y']<=j+buff))&(((i-1-buff)<=data['x']) & (data['x']<=i+buff)))]
+    
+    return data
+def removeSquare(data,i,j):
+    data=data[~((((j-1)<=data['y']) & (data['y']<=j))&(((i-1)<=data['x']) & (data['x']<=i)))]
+
+    
+
+    return data
+def getPercentError(guess,label):
+    correct=(guess==label)
+    return (1./correct.shape[0])*sum(correct)
 def plot3DScatter(data):
 
     fig = plt.figure()
@@ -68,11 +95,87 @@ def getSamplePlace(numberOfPlaces=1):
 
 def normalize(series):
     return (series-min(series))/(max(series)-min(series))    
+    
+def myf(a,w):
+    lookupTable, indexed_dataSet = np.unique(a, return_inverse=True)
+    
+    y= np.bincount(indexed_dataSet,w)
+    lookupTable[y.argsort()]
+    res=(lookupTable[y.argsort()][::-1][:3])
+    ret=np.empty((3))
+    ret.fill(res[-1])
+    ret[0:res.shape[0]]=res
+    return ret
+def trainData(X,y):
+    X_train=X
+    y_train=y
 
+    #clf = neighbors.KNeighborsClassifier(25)
+    clf = neighbors.KNeighborsClassifier(n_neighbors=25, weights='distance', 
+                               metric='manhattan')
+    ft=clf.fit(X_train, y_train)
+    return ft
+    
+    
+
+def predictTest(test,clf,y_train,X_train,X_train_acc):
+    distances,indices=clf.kneighbors(test)
+    knearest_locs=np.array(X_train)[indices]
+    knearest_labels=np.array(y_train)[indices]
+    knearest_acc=np.array(X_train_acc)[indices]
+    points=np.array(test)
+    reppoints=np.tile(points,(25,1,1))
+    reppoints=reppoints.transpose((1,0,2))
+
+    ty=knearest_locs-reppoints
+    tys=np.square(ty)
+    tyssum=np.sum(tys,axis=2)
+    tyssums=np.sqrt(tyssum)
+    tyssumsac=knearest_acc/tyssums
+
+
+    
+    result = np.empty_like(knearest_labels[:,0:3])
+    for i,(x,y) in enumerate(zip(knearest_labels,tyssumsac)):
+        result[i] = myf(x,y)
+    return result
+
+def predictRegion(train,test):
+
+    #train['x']=normalize(train['x'])
+    #train['y']=normalize(train['y'])
+    #train['time']=normalize(train['time'])
+    train['accuracy']=normalize(train['accuracy'])
+    train=convertTime(train)
+    test=convertTime(test)
+    #test['x']=normalize(test['x'])
+    #test['y']=normalize(test['y'])
+    #test['time']=normalize(test['time'])
+
+
+    y_train=train.place_id
+    X_train=train.drop('place_id',1)
+    X_train_acc=X_train.accuracy
+    X_train=X_train.drop('accuracy',1)
+    X_train=X_train.drop('row_id',1)
+    ft=trainData(X_train,y_train)
+    
+
+
+    X_test=test.drop('accuracy',1)
+    row_id=X_test['row_id']
+    X_test=X_test.drop('row_id',1)
+
+
+
+    pred=predictTest(X_test,ft,y_train,X_train,X_train_acc)
+    result=np.insert(pred,0,row_id,axis=1)
+    return result
+    
 numberOfPlaces=8
 
 train=loadtraindata()
-
+test=loadtestdata()
 plt.figure(10, figsize=(14,16))
 cmapm = plt.cm.viridis
 cmapm.set_bad("0.5",1.)
@@ -120,46 +223,59 @@ ax.set_zlabel('time')
 ax.scatter(normalize(sample.x),normalize(sample.y),normalize(sample.time),c=cols,marker='o',depthshade=False,lw = 0)
 plt.show()
 
-#kmeans starts here
-train['time']=normalize(train['time'])
-train['accuracy']=normalize(train['accuracy'])
-train=getSquare(train,1,1)
-X_train, X_test = cross_validation.train_test_split(train, test_size=0.33, random_state=42)
+#kmeans starts here normalize data
+
+
+
+#train=getSquare(train,1,1)
+#X_train, X_test = cross_validation.train_test_split(train, test_size=0.33, random_state=42)
+
 #train=train.drop('time',1)
 #nd=normalize(small['accuracy'])
 #small=small[nd<0.1]
 
-y_train=X_train.place_id
-X_train=X_train.drop('place_id',1)
-X_train_acc=X_train.accuracy
-X_train=X_train.drop('accuracy',1)
-X_train=X_train.drop('row_id',1)
-clf = neighbors.KNeighborsClassifier(5)
+pred= np.empty((0,4), int)
+for i in range(1,11):
+    for j in range(1,11):
+        print i
+        print j
+        res=predictRegion(getSquare(train,i,j,0.1),getSquare(test,i,j,0))
+        test=removeSquare(test,i,j)
+        pred=np.append(pred,res,0)
+pred=pred[np.argsort(pred[:,0])]
+re=pd.DataFrame(pred)
+x=re[1].astype(str)+" "+re[2].astype(str)+" "+re[3].astype(str)
+re=pd.DataFrame(np.concatenate((pred[:,0].reshape(-1,1),x.reshape(-1,1)),1))
+re.columns=["row_id","place_id"]
+re.to_csv("C:\\Users\\hardy_000\\fbcomp\\submission.csv",index=False)
+#np.savetxt("foo.csv", pred, delimiter=",")
+#eh=np.apply_along_axis(np.bincount,1,np.arange(5),weights=tyssumsac)
+#np.bincount(np.arange(5),tyssumsac[0])
+#a=np.apply_along_axis(np.unique,0,knearest_labels[:])
+#a=pd.DataFrame(knearest_labels)
+#w=pd.DataFrame(tyssumsac)
+#s=w.groupby(by=knearest_labels,axis=1)
+#a=np.array([[1,2,3],[5,5,5]])
+#te=np.array([1,2,3,4,6,4])
 
-ft=clf.fit(X_train, y_train)
-X_test_acc=X_test.accuracy
-X_test=X_test.drop('accuracy',1)
-X_test=X_test.drop('row_id',1)
-y_test=X_test['place_id']
-X_test=X_test.drop('place_id',1)
-res=clf.predict(X_test)
-bol=(res==y_test)
-fin=(1./bol.size)*sum(bol)
 
-##may want to link accuracy to below somehow
-nbrs=NearestNeighbors(5,algorithm='ball_tree').fit(X_train)
-distances,indices=nbrs.kneighbors(X_test)
-knearest_locs=np.array(X_train)[indices]
-knearest_labels=np.array(y_train)[indices]
-knearest_acc=np.array(X_train_acc)[indices]
-points=np.array(X_test)
-reppoints=np.tile(points,(5,1,1))
-reppoints=reppoints.transpose((1,0,2))
 
-ty=knearest_locs-reppoints
-tys=np.square(ty)
-tyssum=np.sum(tys,axis=2)
-tyssums=np.sqrt(tyssum)
-tyssumsac=tyssums/knearest_acc
-eh=np.apply_along_axis(np.bincount,1,np.arange(5),weights=tyssumsac)
-np.bincount(np.arange(5),tyssumsac[0])
+#getPercentError(result,reppoints.T)
+
+#np.unique(te,return_counts=True)
+#z.apply(lambda x : pd.Series(x.value_counts()),axis=1)
+##knearest_labels=pd.DataFrame(knearest_labels)
+#tyssumsac=pd.DataFrame(tyssumsac)
+#x=pd.DataFrame(
+#    {i: knearest_labels.loc[i, row.sort_values(ascending=False).index[:3]].values for i, row in tyssumsac.iterrows()}
+#).T
+#ac=(x[2]==y_test)
+#per=sum(ac)*(1./ac.size)
+#import scipy.stats.mstats as st
+
+#m=st.mode(knearest_labels,1)
+#l=m[0].data==np.array(y_test).reshape(-1,1)
+#(sum(l))*(1./l.size)
+
+
+
