@@ -15,6 +15,7 @@ from sklearn import cross_validation
 from sklearn.metrics import pairwise
 from scipy.spatial import distance
 import scipy as sp
+from sklearn import decomposition
 import sklearn as skl
 from collections import Counter
 
@@ -44,24 +45,35 @@ def discrete_cmap(N, base_cmap=None):
     return base.from_list(cmap_name, color_list, N)
     
 def convertTime(df):
-    df['x']=df['x']*fw[0]
-    df['y']=df['y']*fw[1]
+    df['x']=df['x']
+    df['y']=df['y']
     
     initial_date = np.datetime64('2014-01-01T01:01', dtype='datetime64[m]')
     d_times = pd.DatetimeIndex(initial_date + np.timedelta64(int(mn), 'm') 
                                for mn in df.time.values)    
-    df['hour'] = (d_times.hour+ d_times.minute/60) * fw[2]
-    df['weekday'] = d_times.weekday * fw[3]
-    df['month'] = d_times.month * fw[4]
-    df['year'] = (d_times.year - 2013) * fw[5]
+    df['hour'] = (d_times.hour+ d_times.minute/60)
+    df['weekday'] = d_times.weekday 
+    df['month'] = d_times.month 
+    df['year'] = (d_times.year - 2013) 
 
     df = df.drop(['time'], axis=1) 
     return df
     
+def scaleFeatures(df):
+    df['x']=df['x']*fw[0]
+    df['y']=df['y']*fw[1]
+    df['hour']=df['hour']*fw[2]
+    df['weekday']=df['weekday']*fw[3]
+    df['month']=df['month']*fw[4]
+    df['year']=df['year']*fw[5]
+    return df
+    
 def getSquare(data,i,j,buff):
+    
     data=data[((((j-1-buff)<=data['y']) & (data['y']<=j+buff))&(((i-1-buff)<=data['x']) & (data['x']<=i+buff)))]
     
     return data
+    
 def removeSquare(data,i,j):
     data=data[~((((j-1)<=data['y']) & (data['y']<=j))&(((i-1)<=data['x']) & (data['x']<=i)))]
 
@@ -77,8 +89,9 @@ def plot3DScatter(data):
     ax = fig.add_subplot(111, projection='3d')
     plt.xlabel('x')
     plt.ylabel('y')
-    ax.set_zlabel('time')
-    ax.scatter(normalize(data.x),normalize(data.y),normalize(data.time),c=data.place_id,marker='o',depthshade=False,lw = 0)
+    ax.set_zlabel('month')
+    ax.scatter(data.x,data.y,data.time,c=data.place_id,marker='o',depthshade=False,lw = 0)
+    plt.axis('equal')
     plt.show()
 #places=train.groupby('place_id')
 #meanplaces=places.mean()
@@ -131,7 +144,8 @@ def predictTest(test,clf,y_train,X_train,X_train_acc):
     tys=np.square(ty)
     tyssum=np.sum(tys,axis=2)
     tyssums=np.sqrt(tyssum)
-    tyssumsac=knearest_acc/tyssums
+    
+    tyssumsac=knearest_acc/knearest_acc
 
 
     
@@ -146,8 +160,8 @@ def predictRegion(train,test):
     #train['y']=normalize(train['y'])
     #train['time']=normalize(train['time'])
     train['accuracy']=normalize(train['accuracy'])
-    train=convertTime(train)
-    test=convertTime(test)
+    train=scaleFeatures(train)
+    test=scaleFeatures(test)
     #test['x']=normalize(test['x'])
     #test['y']=normalize(test['y'])
     #test['time']=normalize(test['time'])
@@ -185,7 +199,7 @@ for i in range(numberOfPlaces):
     sample_place=getSamplePlace(i)
     
     
-    counts, binsX, binsY = np.histogram2d(sample_place["x"], sample_place["y"], bins=100,weights=normalize(sample_place['accuracy']))
+    counts, binsX, binsY = np.histogram2d(sample_place["x"]*1000, sample_place["y"]*500, bins=100,weights=normalize(sample_place['accuracy']))
     extent = [0,10,0,10]
     plt.subplot(5,4,i+1)
     
@@ -198,6 +212,7 @@ for i in range(numberOfPlaces):
     plt.grid(True, c='0.6', lw=0.5)
     plt.xlabel("X")
     plt.ylabel("Y")
+    
     plt.title("pid: " + str(sample_place['place_id'])[0])
 plt.show()
 
@@ -228,54 +243,42 @@ plt.show()
 
 
 #train=getSquare(train,1,1)
-#X_train, X_test = cross_validation.train_test_split(train, test_size=0.33, random_state=42)
+#train=getSquare(loadtraindata(),1,1,0.3)
+#train, test = cross_validation.train_test_split(train, test_size=0.33, random_state=42)
+train=convertTime(train)
+test=convertTime(test)
+s=train.place_id[~np.in1d(np.unique(np.where(train.year==1)),np.unique(np.where(train.year==2)))]
+train=train[np.in1d(train.place_id,s)]
+
+
+
 
 #train=train.drop('time',1)
 #nd=normalize(small['accuracy'])
 #small=small[nd<0.1]
-
+p=0
+labs=0
 pred= np.empty((0,4), int)
 for i in range(1,11):
     for j in range(1,11):
-        print i
-        print j
-        res=predictRegion(getSquare(train,i,j,0.1),getSquare(test,i,j,0))
+        temp=getSquare(test,i,j,0)
+        res=predictRegion(getSquare(train,i,j,0.3),temp)
         test=removeSquare(test,i,j)
         pred=np.append(pred,res,0)
 pred=pred[np.argsort(pred[:,0])]
+labs=np.array(labs)[np.argsort(labs.index)]
+
+
 re=pd.DataFrame(pred)
 x=re[1].astype(str)+" "+re[2].astype(str)+" "+re[3].astype(str)
 re=pd.DataFrame(np.concatenate((pred[:,0].reshape(-1,1),x.reshape(-1,1)),1))
 re.columns=["row_id","place_id"]
 re.to_csv("C:\\Users\\hardy_000\\fbcomp\\submission.csv",index=False)
-#np.savetxt("foo.csv", pred, delimiter=",")
-#eh=np.apply_along_axis(np.bincount,1,np.arange(5),weights=tyssumsac)
-#np.bincount(np.arange(5),tyssumsac[0])
-#a=np.apply_along_axis(np.unique,0,knearest_labels[:])
-#a=pd.DataFrame(knearest_labels)
-#w=pd.DataFrame(tyssumsac)
-#s=w.groupby(by=knearest_labels,axis=1)
-#a=np.array([[1,2,3],[5,5,5]])
-#te=np.array([1,2,3,4,6,4])
 
 
 
-#getPercentError(result,reppoints.T)
 
-#np.unique(te,return_counts=True)
-#z.apply(lambda x : pd.Series(x.value_counts()),axis=1)
-##knearest_labels=pd.DataFrame(knearest_labels)
-#tyssumsac=pd.DataFrame(tyssumsac)
-#x=pd.DataFrame(
-#    {i: knearest_labels.loc[i, row.sort_values(ascending=False).index[:3]].values for i, row in tyssumsac.iterrows()}
-#).T
-#ac=(x[2]==y_test)
-#per=sum(ac)*(1./ac.size)
-#import scipy.stats.mstats as st
 
-#m=st.mode(knearest_labels,1)
-#l=m[0].data==np.array(y_test).reshape(-1,1)
-#(sum(l))*(1./l.size)
 
 
 
