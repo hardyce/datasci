@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import matplotlib as mpl
+import xgboost as xgb
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn import neighbors, datasets
 from sklearn.neighbors import NearestNeighbors
@@ -18,6 +19,7 @@ import scipy as sp
 from sklearn import decomposition
 import sklearn as skl
 from collections import Counter
+from sklearn import preprocessing
 
 
 fw = [500, 1000, 4, 3, 2, 10] 
@@ -30,19 +32,15 @@ def loadtestdata():
     z= pd.read_csv("C:\\Users\\hardy_000\\fbcomp\\test.csv")
 
     return z
-def discrete_cmap(N, base_cmap=None):
-    """Create an N-bin discrete colormap from the specified input map"""
-    # By Jake VanderPlas
-    # License: BSD-style
-    
-    # Note that if base_cmap is a string or None, you can simply do
-    #    return plt.cm.get_cmap(base_cmap, N)
-    # The following works for string, None, or a colormap instance:
 
-    base = plt.cm.get_cmap(base_cmap)
-    color_list = base(np.linspace(0, 1, N))
-    cmap_name = base.name + str(N)
-    return base.from_list(cmap_name, color_list, N)
+    
+
+    
+def removeNonRecentPlaces(df):
+    s=df.place_id[~np.in1d(np.unique(np.where(df.year==1)),np.unique(np.where(df.year==2)))]
+    df=df[np.in1d(df.place_id,s)]
+    return df
+        
     
 def convertTime(df):
     df['x']=df['x']
@@ -68,14 +66,14 @@ def scaleFeatures(df):
     df['year']=df['year']*fw[5]
     return df
     
-def getSquare(data,i,j,buff):
+def getSquare(data,i,j,width,buff):
     
-    data=data[((((j-1-buff)<=data['y']) & (data['y']<=j+buff))&(((i-1-buff)<=data['x']) & (data['x']<=i+buff)))]
+    data=data[((((j-width-buff)<=data['y']) & (data['y']<=j+buff))&(((i-width-buff)<=data['x']) & (data['x']<=i+buff)))]
     
     return data
     
-def removeSquare(data,i,j):
-    data=data[~((((j-1)<=data['y']) & (data['y']<=j))&(((i-1)<=data['x']) & (data['x']<=i)))]
+def removeSquare(data,i,j,width):
+    data=data[~((((j-width)<=data['y']) & (data['y']<=j))&(((i-width)<=data['x']) & (data['x']<=i)))]
 
     
 
@@ -83,16 +81,7 @@ def removeSquare(data,i,j):
 def getPercentError(guess,label):
     correct=(guess==label)
     return (1./correct.shape[0])*sum(correct)
-def plot3DScatter(data):
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    plt.xlabel('x')
-    plt.ylabel('y')
-    ax.set_zlabel('month')
-    ax.scatter(data.x,data.y,data.time,c=data.place_id,marker='o',depthshade=False,lw = 0)
-    plt.axis('equal')
-    plt.show()
 #places=train.groupby('place_id')
 #meanplaces=places.mean()
 #meanplaces=meanplaces.reset_index(drop=False)
@@ -119,19 +108,46 @@ def myf(a,w):
     ret.fill(res[-1])
     ret[0:res.shape[0]]=res
     return ret
+    
+def trainNeighbors(data,labels):
+
+    clf = neighbors.KNeighborsClassifier(25)
+    clf = neighbors.KNeighborsClassifier(n_neighbors=25, weights='distance', 
+                              metric='manhattan')
+    return clf.fit(data,labels)
+    
+def trainXGB(X_train,y_train):
+    
+    le=preprocessing.LabelEncoder()
+    le.fit(y_train)
+    labels=le.transform(y_train)
+    dm_train = xgb.DMatrix(X_train, label=labels)
+    
+    res = xgb.cv({'eta': 0.1, 'objective': 'multi:softprob',
+             'num_class': len(le.classes_),
+             'alpha': 0.1, 'lambda': 0.1, 'booster': 'gbtree','nthreads':4},
+            dm_train, num_boost_round=200, nfold=3, seed=42,
+            early_stopping_rounds=10
+            
+        )
+    N_epochs = res.shape[0]
+    param = {'nthreads':4,'early_stopping_rounds':10, 'verbose_eval':10,'max_depth':3,'eta':0.1, 'silent':1, 'objective':'multi:softprob','num_class': len(np.unique(labels)) }
+    #clf=trainNeighbors(X_train,labels)
+
+    clf=xgb.train(param,dm_train,num_boost_round=N_epochs)
+    return clf,le
+    
 def trainData(X,y):
     X_train=X
     y_train=y
+    
+    clf,le=trainXGB(X_train,y_train)
 
-    #clf = neighbors.KNeighborsClassifier(25)
-    clf = neighbors.KNeighborsClassifier(n_neighbors=25, weights='distance', 
-                               metric='manhattan')
-    ft=clf.fit(X_train, y_train)
-    return ft
+    return clf,le
     
     
 
-def predictTest(test,clf,y_train,X_train,X_train_acc):
+def predictNeighbors(test,clf,y_train,X_train,X_train_acc):
     distances,indices=clf.kneighbors(test)
     knearest_locs=np.array(X_train)[indices]
     knearest_labels=np.array(y_train)[indices]
@@ -153,15 +169,30 @@ def predictTest(test,clf,y_train,X_train,X_train_acc):
     for i,(x,y) in enumerate(zip(knearest_labels,tyssumsac)):
         result[i] = myf(x,y)
     return result
+def predictXGB(ft,data,le):
+    pred=ft.predict(xgb.DMatrix(data))
+    pred_idx = np.argsort(pred, axis=1)[:, -3:][:, ::-1]
+    c = np.array(le.classes_)
+    pred_id = np.take(c, pred_idx)
+    return pred_id
+def dropLowFreq(data,keepN):
+    vc = data.place_id.value_counts()
 
+# eliminate all ids which are low enough frequency
+    vc = vc[np.cumsum(vc.values) < keepN]
+    df1 = pd.DataFrame({'place_id': vc.index, 'freq': vc.values})
+
+# this represents the training set after all low frequency place_ids
+# are removed
+    return pd.merge(data, df1, on='place_id',how='inner').drop('freq',axis=1)
 def predictRegion(train,test):
 
     #train['x']=normalize(train['x'])
     #train['y']=normalize(train['y'])
     #train['time']=normalize(train['time'])
     train['accuracy']=normalize(train['accuracy'])
-    train=scaleFeatures(train)
-    test=scaleFeatures(test)
+    #train=scaleFeatures(train)
+    #test=scaleFeatures(test)
     #test['x']=normalize(test['x'])
     #test['y']=normalize(test['y'])
     #test['time']=normalize(test['time'])
@@ -172,7 +203,8 @@ def predictRegion(train,test):
     X_train_acc=X_train.accuracy
     X_train=X_train.drop('accuracy',1)
     X_train=X_train.drop('row_id',1)
-    ft=trainData(X_train,y_train)
+    print("training")
+    ft,le=trainData(X_train,y_train)
     
 
 
@@ -181,62 +213,17 @@ def predictRegion(train,test):
     X_test=X_test.drop('row_id',1)
 
 
-
-    pred=predictTest(X_test,ft,y_train,X_train,X_train_acc)
+    print("Predicting")
+    #pred=predictTest(X_test,ft,y_train,X_train,X_train_acc)
+    pred=predictXGB(ft,X_test,le)
+    
     result=np.insert(pred,0,row_id,axis=1)
     return result
     
-numberOfPlaces=8
-
-train=loadtraindata()
-test=loadtestdata()
-plt.figure(10, figsize=(14,16))
-cmapm = plt.cm.viridis
-cmapm.set_bad("0.5",1.)
-
-    
-for i in range(numberOfPlaces):
-    sample_place=getSamplePlace(i)
-    
-    
-    counts, binsX, binsY = np.histogram2d(sample_place["x"]*1000, sample_place["y"]*500, bins=100,weights=normalize(sample_place['accuracy']))
-    extent = [0,10,0,10]
-    plt.subplot(5,4,i+1)
-    
-    plt.imshow(np.log10(counts.T),
-               interpolation='none',
-               origin='lower',
-               extent=extent,
-               aspect="auto",
-               cmap=cmapm)
-    plt.grid(True, c='0.6', lw=0.5)
-    plt.xlabel("X")
-    plt.ylabel("Y")
-    
-    plt.title("pid: " + str(sample_place['place_id'])[0])
-plt.show()
 
 
-sample=getSamplePlaces(train,30)
-norm = mpl.colors.Normalize(vmin=min(sample.place_id),vmax=max(sample.place_id))
-cp=plt.cm.get_cmap('jet')
-cp=discrete_cmap(30,cp)
-cols=cp(norm(sample['place_id']))
-cols[:,3]=normalize(sample['accuracy'])
-fig=plt.figure(11, figsize=(14,16))
-fig.add_subplot(111)
-plt.scatter(sample['x'],sample['y'],color=cols)
-plt.xlabel("X")
-plt.ylabel("Y")
-plt.show()
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-plt.xlabel('x')
-plt.ylabel('y')
-ax.set_zlabel('time')
-ax.scatter(normalize(sample.x),normalize(sample.y),normalize(sample.time),c=cols,marker='o',depthshade=False,lw = 0)
-plt.show()
+
 
 #kmeans starts here normalize data
 
@@ -244,11 +231,21 @@ plt.show()
 
 #train=getSquare(train,1,1)
 #train=getSquare(loadtraindata(),1,1,0.3)
-#train, test = cross_validation.train_test_split(train, test_size=0.33, random_state=42)
-train=convertTime(train)
-test=convertTime(test)
-s=train.place_id[~np.in1d(np.unique(np.where(train.year==1)),np.unique(np.where(train.year==2)))]
-train=train[np.in1d(train.place_id,s)]
+numberOfNeighbors=25
+testing=False
+if(testing):
+    train, test = cross_validation.train_test_split(getSquare(loadtraindata(),1,1,1,0.3), test_size=0.33, random_state=42)
+else:
+    train=loadtraindata()
+    test=loadtestdata()
+
+#train=convertTime(train)
+#test=convertTime(test)
+#train=removeNonRecentPlaces(train)
+train=dropLowFreq(train,train.shape[0]*0.5)
+
+gridsize=50
+cellwidth=10./gridsize
 
 
 
@@ -256,17 +253,32 @@ train=train[np.in1d(train.place_id,s)]
 #train=train.drop('time',1)
 #nd=normalize(small['accuracy'])
 #small=small[nd<0.1]
-p=0
-labs=0
+numSquares=gridsize
+if(testing):
+    numSquares=1
 pred= np.empty((0,4), int)
-for i in range(1,11):
-    for j in range(1,11):
-        temp=getSquare(test,i,j,0)
-        res=predictRegion(getSquare(train,i,j,0.3),temp)
-        test=removeSquare(test,i,j)
+labels=np.empty((0,),int)
+for i in range(1,numSquares+1):
+    for j in range(1,numSquares+1):
+        print i
+        print j
+        testSquare=getSquare(test,i*cellwidth,j*cellwidth,cellwidth,0)
+        if(testing):
+            labels=np.append(labels,np.array(testSquare.place_id),0)
+            testSquare=testSquare.drop('place_id',axis=1)
+            
+        
+
+        res=predictRegion(getSquare(train,i*cellwidth,j*cellwidth,cellwidth,0),testSquare)
+        test=removeSquare(test,i*cellwidth,j*cellwidth,cellwidth)
         pred=np.append(pred,res,0)
-pred=pred[np.argsort(pred[:,0])]
-labs=np.array(labs)[np.argsort(labs.index)]
+
+indexOrder=np.argsort(pred[:,0])
+
+pred=pred[indexOrder]
+if(testing==True):
+    print(getPercentError(pred[:,1],labels[indexOrder]))
+
 
 
 re=pd.DataFrame(pred)
@@ -274,11 +286,7 @@ x=re[1].astype(str)+" "+re[2].astype(str)+" "+re[3].astype(str)
 re=pd.DataFrame(np.concatenate((pred[:,0].reshape(-1,1),x.reshape(-1,1)),1))
 re.columns=["row_id","place_id"]
 re.to_csv("C:\\Users\\hardy_000\\fbcomp\\submission.csv",index=False)
-
-
-
-
-
-
-
+data = np.random.rand(5,10) # 5 entities, each contains 10 features
+label = np.random.randint(2, size=5) # binary target
+dtrain = xgb.DMatrix( data, label=label)
 
