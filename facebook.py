@@ -4,26 +4,34 @@ Created on Fri Jun 03 21:00:28 2016
 
 @author: hardy_000
 """
-import matplotlib.pyplot as plt
+
 import pandas as pd
 import numpy as np
-import matplotlib as mpl
 import xgboost as xgb
-from mpl_toolkits.mplot3d import Axes3D
-from sklearn import neighbors, datasets
+from sklearn import neighbors
 from sklearn.neighbors import NearestNeighbors
 from sklearn import cross_validation
-from sklearn.metrics import pairwise
-from scipy.spatial import distance
+import uuid
 import scipy as sp
-from sklearn import decomposition
+import os
 import sklearn as skl
-from collections import Counter
+
 from sklearn import preprocessing
+from bayes_opt import BayesianOptimization
+import functools
+fw = [0.6, 0.32935, 0.56515, 0.2670, 22, 52, 0.51785]
+def processData(testing):
+    if(testing):
+        train, test = cross_validation.train_test_split(getSquare(loadtraindata(),1,1,1,0.3), test_size=0.33, random_state=42)
+    else:
+        train=loadtraindata()
+        test=loadtestdata()
 
-
-fw = [500, 1000, 4, 3, 2, 10] 
-
+    train=featureEngineering(train)
+    test=featureEngineering(test)
+    train=removeNonRecentPlaces(train)
+    #train=dropLowFreq(train,train.shape[0]*0.5)
+    return train,test
 def loadtraindata():
     z= pd.read_csv("C:\\Users\\hardy_000\\fbcomp\\train.csv")
     return z
@@ -33,7 +41,21 @@ def loadtestdata():
 
     return z
 
-    
+def mapkprecision(truthvalues, predictions):
+    '''
+    This is a faster implementation of MAP@k valid for numpy arrays.
+    It is only valid when there is one single truth value. 
+
+    m ~ number of observations
+    k ~ MAP at k -- in this case k should equal 3
+
+    truthvalues.shape = (m,) 
+    predictions.shape = (m, k)
+    '''
+    z = (predictions == truthvalues[:, None]).astype(np.float32)
+    weights = 1./(np.arange(predictions.shape[1], dtype=np.float32) + 1.)
+    z = z * weights[None, :]
+    return np.mean(np.sum(z, axis=1))
 
     
 def removeNonRecentPlaces(df):
@@ -41,29 +63,73 @@ def removeNonRecentPlaces(df):
     df=df[np.in1d(df.place_id,s)]
     return df
         
-    
-def convertTime(df):
+def prepareSubmission(pred):
+    re=pd.DataFrame(pred)
+    x=re[1].astype(str)+" "+re[2].astype(str)+" "+re[3].astype(str)
+    re=pd.DataFrame(np.concatenate((pred[:,0].reshape(-1,1),x.reshape(-1,1)),1))
+    re.columns=["row_id","place_id"]
+    re.to_csv("submissionalex.csv",index=False)
+def runSolution(testing,train,test,acc_w,daysin_w,daycos_w,minsin_w,mincos_w,weekdaysin_w,weekdaycos_w,x_w,y_w,year_w):
+    if(testing):
+        numSquares=1
+        pred= np.empty((0,4), int)
+        labels=np.empty((0,),int)
+        for i in range(1,numSquares+1):
+            for j in range(1,numSquares+1):
+
+                testSquare=getSquare(test,i*cellwidth,j*cellwidth,cellwidth,0)
+            if(testing):
+                labels=np.append(labels,np.array(testSquare.place_id),0)
+                testSquare=testSquare.drop('place_id',axis=1)
+            
+        
+
+            res=predictRegion(getSquare(train,i*cellwidth,j*cellwidth,cellwidth,cellwidth*0.3),testSquare,acc_w,daysin_w,daycos_w,minsin_w,mincos_w,weekdaysin_w,weekdaycos_w,x_w,y_w,year_w)
+            test=removeSquare(test,i*cellwidth,j*cellwidth,cellwidth)
+            pred=np.append(pred,res,0)
+
+    indexOrder=np.argsort(pred[:,0])
+
+    pred=pred[indexOrder]
+
+    if(testing==True):
+        pred=mapkprecision(labels[indexOrder],pred[:,1])
+        
+    return pred
+def featureEngineering(df):
     df['x']=df['x']
     df['y']=df['y']
     
-    initial_date = np.datetime64('2014-01-01T01:01', dtype='datetime64[m]')
-    d_times = pd.DatetimeIndex(initial_date + np.timedelta64(int(mn), 'm') 
-                               for mn in df.time.values)    
-    df['hour'] = (d_times.hour+ d_times.minute/60)
-    df['weekday'] = d_times.weekday 
-    df['month'] = d_times.month 
-    df['year'] = (d_times.year - 2013) 
-
-    df = df.drop(['time'], axis=1) 
+    minute = 2*np.pi*((df["time"]//5)%288)/288
+    df['minute_sin'] = (np.sin(minute)+1).round(4)
+    df['minute_cos'] = (np.cos(minute)+1).round(4)
+    del minute
+    day = 2*np.pi*((df['time']//1440)%365)/365
+    df['day_of_year_sin'] = (np.sin(day)+1).round(4)
+    df['day_of_year_cos'] = (np.cos(day)+1).round(4)
+    del day
+    weekday = 2*np.pi*((df['time']//1440)%7)/7
+    df['weekday_sin'] = (np.sin(weekday)+1).round(4)
+    df['weekday_cos'] = (np.cos(weekday)+1).round(4)
+    del weekday
+    df['year'] = (((df['time'])//525600))
+    df.drop(['time'], axis=1, inplace=True)
+    df['accuracy'] = np.log10(df['accuracy'])
     return df
     
-def scaleFeatures(df):
-    df['x']=df['x']*fw[0]
-    df['y']=df['y']*fw[1]
-    df['hour']=df['hour']*fw[2]
-    df['weekday']=df['weekday']*fw[3]
-    df['month']=df['month']*fw[4]
-    df['year']=df['year']*fw[5]
+def scaleFeatures(df,acc_w,daysin_w,daycos_w,minsin_w,mincos_w,weekdaysin_w,weekdaycos_w,x_w,y_w,year_w):
+    df['accuracy'] *= acc_w
+    df['day_of_year_sin'] *= daysin_w
+    df['day_of_year_cos'] *= daycos_w
+    df['minute_sin'] *= minsin_w
+    df['minute_cos'] *= mincos_w
+    df['weekday_sin'] *= weekdaysin_w
+    df['weekday_cos'] *= weekdaycos_w
+    df.x *= x_w
+    df.y *= y_w
+    df['year'] *= year_w
+    
+    
     return df
     
 def getSquare(data,i,j,width,buff):
@@ -74,9 +140,6 @@ def getSquare(data,i,j,width,buff):
     
 def removeSquare(data,i,j,width):
     data=data[~((((j-width)<=data['y']) & (data['y']<=j))&(((i-width)<=data['x']) & (data['x']<=i)))]
-
-    
-
     return data
 def getPercentError(guess,label):
     correct=(guess==label)
@@ -141,9 +204,9 @@ def trainData(X,y):
     X_train=X
     y_train=y
     
-    clf,le=trainXGB(X_train,y_train)
+    clf=trainNeighbors(X_train,y_train)
 
-    return clf,le
+    return clf
     
     
 
@@ -155,13 +218,18 @@ def predictNeighbors(test,clf,y_train,X_train,X_train_acc):
     points=np.array(test)
     reppoints=np.tile(points,(25,1,1))
     reppoints=reppoints.transpose((1,0,2))
-
     ty=knearest_locs-reppoints
+    #with 0.565294588918
+    #without 0.56522962995
+    ty[:,3] = np.where(np.absolute(ty[:,3])>12, 24-np.absolute(ty[:,3]), ty[:,3])
+    #ty[:,4] = np.where(ty[:,3]>3, 7-ty[:,4], ty[:,4])
+    #ty[:,5] = np.where(ty[:,5]>6, 12-ty[:,5], ty[:,5])
+    
     tys=np.square(ty)
     tyssum=np.sum(tys,axis=2)
     tyssums=np.sqrt(tyssum)
     
-    tyssumsac=knearest_acc/knearest_acc
+    tyssumsac=1./tyssums
 
 
     
@@ -185,14 +253,14 @@ def dropLowFreq(data,keepN):
 # this represents the training set after all low frequency place_ids
 # are removed
     return pd.merge(data, df1, on='place_id',how='inner').drop('freq',axis=1)
-def predictRegion(train,test):
+def predictRegion(train,test,acc_w,daysin_w,daycos_w,minsin_w,mincos_w,weekdaysin_w,weekdaycos_w,x_w,y_w,year_w):
 
     #train['x']=normalize(train['x'])
     #train['y']=normalize(train['y'])
     #train['time']=normalize(train['time'])
-    train['accuracy']=normalize(train['accuracy'])
-    #train=scaleFeatures(train)
-    #test=scaleFeatures(test)
+    #train['accuracy']=normalize(train['accuracy'])
+    train=scaleFeatures(train,acc_w,daysin_w,daycos_w,minsin_w,mincos_w,weekdaysin_w,weekdaycos_w,x_w,y_w,year_w)
+    test=scaleFeatures(test,acc_w,daysin_w,daycos_w,minsin_w,mincos_w,weekdaysin_w,weekdaycos_w,x_w,y_w,year_w)
     #test['x']=normalize(test['x'])
     #test['y']=normalize(test['y'])
     #test['time']=normalize(test['time'])
@@ -201,21 +269,20 @@ def predictRegion(train,test):
     y_train=train.place_id
     X_train=train.drop('place_id',1)
     X_train_acc=X_train.accuracy
-    X_train=X_train.drop('accuracy',1)
+    #X_train=X_train.drop('accuracy',1)
     X_train=X_train.drop('row_id',1)
     print("training")
-    ft,le=trainData(X_train,y_train)
+    ft=trainData(X_train,y_train)
     
-
-
-    X_test=test.drop('accuracy',1)
+    #X_test=test.drop('accuracy',1)
+    X_test=test
     row_id=X_test['row_id']
     X_test=X_test.drop('row_id',1)
 
 
     print("Predicting")
     #pred=predictTest(X_test,ft,y_train,X_train,X_train_acc)
-    pred=predictXGB(ft,X_test,le)
+    pred=predictNeighbors(X_test,ft,y_train,X_train,X_train_acc)
     
     result=np.insert(pred,0,row_id,axis=1)
     return result
@@ -228,65 +295,46 @@ def predictRegion(train,test):
 #kmeans starts here normalize data
 
 
-
+uuid_string = str(uuid.uuid4())
 #train=getSquare(train,1,1)
 #train=getSquare(loadtraindata(),1,1,0.3)
 numberOfNeighbors=25
-testing=False
-if(testing):
-    train, test = cross_validation.train_test_split(getSquare(loadtraindata(),1,1,1,0.3), test_size=0.33, random_state=42)
-else:
-    train=loadtraindata()
-    test=loadtestdata()
+testing=True
+train,loadtest=processData(testing)
 
-#train=convertTime(train)
-#test=convertTime(test)
-#train=removeNonRecentPlaces(train)
-train=dropLowFreq(train,train.shape[0]*0.5)
 
-gridsize=50
+gridsize=10
 cellwidth=10./gridsize
 
 
-
-
-#train=train.drop('time',1)
-#nd=normalize(small['accuracy'])
-#small=small[nd<0.1]
+test=loadtest
 numSquares=gridsize
-if(testing):
-    numSquares=1
-pred= np.empty((0,4), int)
-labels=np.empty((0,),int)
-for i in range(1,numSquares+1):
-    for j in range(1,numSquares+1):
-        print i
-        print j
-        testSquare=getSquare(test,i*cellwidth,j*cellwidth,cellwidth,0)
-        if(testing):
-            labels=np.append(labels,np.array(testSquare.place_id),0)
-            testSquare=testSquare.drop('place_id',axis=1)
-            
-        
+pred=runSolution(testing,train=train,test=test,fw[0],fw[1],fw[1],fw[2],fw[2],fw[3],fw[3],fw[4],fw[5],fw[6])
+fw = [0.6, 0.32935, 0.56515, 0.2670, 22, 52, 0.51785]
 
-        res=predictRegion(getSquare(train,i*cellwidth,j*cellwidth,cellwidth,0),testSquare)
-        test=removeSquare(test,i*cellwidth,j*cellwidth,cellwidth)
-        pred=np.append(pred,res,0)
-
-indexOrder=np.argsort(pred[:,0])
-
-pred=pred[indexOrder]
-if(testing==True):
-    print(getPercentError(pred[:,1],labels[indexOrder]))
-
-
-
-re=pd.DataFrame(pred)
-x=re[1].astype(str)+" "+re[2].astype(str)+" "+re[3].astype(str)
-re=pd.DataFrame(np.concatenate((pred[:,0].reshape(-1,1),x.reshape(-1,1)),1))
-re.columns=["row_id","place_id"]
-re.to_csv("C:\\Users\\hardy_000\\fbcomp\\submission.csv",index=False)
-data = np.random.rand(5,10) # 5 entities, each contains 10 features
-label = np.random.randint(2, size=5) # binary target
-dtrain = xgb.DMatrix( data, label=label)
-
+if not testing:
+    prepareSubmission(pred)
+else:
+    print(pred)
+f=functools.partial(runSolution,testing=True,train=train,test=test)
+bo = BayesianOptimization(f=f,
+                                  pbounds={
+                                      'acc_w': (0, 1),
+                                      
+                                      # Fix w_y at 1000 as the most important feature
+                                      #'w_y': (500, 2000), 
+                                      "daysin_w": (0.1, 0.5),
+                                      "daycos_w": (0.1, 0.5),
+                                      "minsin_w": (0.2, 0.7),
+                                      "mincos_w": (0.2, 0.7),
+                                      "weekdaysin_w": (0, 0.4),
+                                      "weekdaycos_w": (0, 0.4),
+                                      "x_w": (18, 24),
+                                      "y_w": (36, 49),
+                                      "year_w": (0.4, 0.6),
+                                      },
+                                  verbose=True
+                                  )
+bo.maximize(init_points=2, n_iter=8, acq="ei", xi=0.1)#0,1 prefer exploration
+with open(os.path.join('knn_params/{}.json'.format(uuid_string)), 'w+') as fh:
+                fh.write(json.dumps(bo.res, sort_keys=True, indent=4))
