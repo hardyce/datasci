@@ -7,6 +7,7 @@ Created on Fri Jun 03 21:00:28 2016
 
 import pandas as pd
 import numpy as np
+import random
 import xgboost as xgb
 from sklearn import neighbors
 from sklearn.neighbors import NearestNeighbors
@@ -15,21 +16,82 @@ import uuid
 import scipy as sp
 import os
 import sklearn as skl
-
+import json
 from sklearn import preprocessing
 from bayes_opt import BayesianOptimization
 import functools
-fw = [0.6, 0.32935, 0.56515, 0.2670, 22, 52, 0.51785]
+
+
+def apk(actual, predicted, k=10):
+    """
+    Computes the average precision at k.
+    This function computes the average prescision at k between two lists of
+    items.
+    Parameters
+    ----------
+    actual : list
+             A list of elements that are to be predicted (order doesn't matter)
+    predicted : list
+                A list of predicted elements (order does matter)
+    k : int, optional
+        The maximum number of predicted elements
+    Returns
+    -------
+    score : double
+            The average precision at k over the input lists
+    """
+    if len(predicted)>k:
+        predicted = predicted[:k]
+
+    score = 0.0
+    num_hits = 0.0
+
+    for i,p in enumerate(predicted):
+        if p in actual and p not in predicted[:i]:
+            num_hits += 1.0
+            score += num_hits / (i+1.0)
+
+    if not actual:
+        return 0.0
+
+    return score / min(len(actual), k)
+
+def mapk(actual, predicted, k=10):
+    """
+    Computes the mean average precision at k.
+    This function computes the mean average prescision at k between two lists
+    of lists of items.
+    Parameters
+    ----------
+    actual : list
+             A list of lists of elements that are to be predicted 
+             (order doesn't matter in the lists)
+    predicted : list
+                A list of lists of predicted elements
+                (order matters in the lists)
+    k : int, optional
+        The maximum number of predicted elements
+    Returns
+    -------
+    score : double
+            The mean average precision at k over the input lists
+    """
+    return np.mean([apk(a,p,k) for a,p in zip(actual, predicted)])
+fw = [0.43134, 0.4122, 0.2718, 0.536, 0.4952, 0.18923, 0.363327,19.7592,42.19212,0.55447]
 def processData(testing):
     if(testing):
-        train, test = cross_validation.train_test_split(getSquare(loadtraindata(),1,1,1,0.3), test_size=0.33, random_state=42)
+        data=loadtraindata()
+        rows = random.sample(data.index, int(data.shape[0]*0.1))
+        df_10 = data.ix[rows]
+        
+        train, test = cross_validation.train_test_split(df_10, test_size=0.33, random_state=42)
     else:
         train=loadtraindata()
         test=loadtestdata()
 
     train=featureEngineering(train)
     test=featureEngineering(test)
-    train=removeNonRecentPlaces(train)
+    #train=removeNonRecentPlaces(train)
     #train=dropLowFreq(train,train.shape[0]*0.5)
     return train,test
 def loadtraindata():
@@ -41,21 +103,7 @@ def loadtestdata():
 
     return z
 
-def mapkprecision(truthvalues, predictions):
-    '''
-    This is a faster implementation of MAP@k valid for numpy arrays.
-    It is only valid when there is one single truth value. 
 
-    m ~ number of observations
-    k ~ MAP at k -- in this case k should equal 3
-
-    truthvalues.shape = (m,) 
-    predictions.shape = (m, k)
-    '''
-    z = (predictions == truthvalues[:, None]).astype(np.float32)
-    weights = 1./(np.arange(predictions.shape[1], dtype=np.float32) + 1.)
-    z = z * weights[None, :]
-    return np.mean(np.sum(z, axis=1))
 
     
 def removeNonRecentPlaces(df):
@@ -68,16 +116,15 @@ def prepareSubmission(pred):
     x=re[1].astype(str)+" "+re[2].astype(str)+" "+re[3].astype(str)
     re=pd.DataFrame(np.concatenate((pred[:,0].reshape(-1,1),x.reshape(-1,1)),1))
     re.columns=["row_id","place_id"]
-    re.to_csv("submissionalex.csv",index=False)
-def runSolution(testing,train,test,acc_w,daysin_w,daycos_w,minsin_w,mincos_w,weekdaysin_w,weekdaycos_w,x_w,y_w,year_w):
-    if(testing):
-        numSquares=1
-        pred= np.empty((0,4), int)
-        labels=np.empty((0,),int)
-        for i in range(1,numSquares+1):
-            for j in range(1,numSquares+1):
+    re.to_csv("submission.csv",index=False)
+def runSolution(testing,train,test,numSquares,acc_w,daysin_w,daycos_w,minsin_w,mincos_w,weekdaysin_w,weekdaycos_w,x_w,y_w,year_w):
+    pred= np.empty((0,4), int)
+    labels=np.empty((0,),int)    
 
-                testSquare=getSquare(test,i*cellwidth,j*cellwidth,cellwidth,0)
+    for i in range(1,numSquares+1):
+        for j in range(1,numSquares+1):
+
+            testSquare=getSquare(test,i*cellwidth,j*cellwidth,cellwidth,0)
             if(testing):
                 labels=np.append(labels,np.array(testSquare.place_id),0)
                 testSquare=testSquare.drop('place_id',axis=1)
@@ -91,9 +138,9 @@ def runSolution(testing,train,test,acc_w,daysin_w,daycos_w,minsin_w,mincos_w,wee
     indexOrder=np.argsort(pred[:,0])
 
     pred=pred[indexOrder]
-
+    print(pred.shape[0])
     if(testing==True):
-        pred=mapkprecision(labels[indexOrder],pred[:,1])
+        pred=mapk(np.array(labels[indexOrder]).reshape(-1,1),np.array(pred),np.array(pred.shape[0]))
         
     return pred
 def featureEngineering(df):
@@ -295,7 +342,7 @@ def predictRegion(train,test,acc_w,daysin_w,daycos_w,minsin_w,mincos_w,weekdaysi
 #kmeans starts here normalize data
 
 
-uuid_string = str(uuid.uuid4())
+
 #train=getSquare(train,1,1)
 #train=getSquare(loadtraindata(),1,1,0.3)
 numberOfNeighbors=25
@@ -309,14 +356,16 @@ cellwidth=10./gridsize
 
 test=loadtest
 numSquares=gridsize
-pred=runSolution(testing,train=train,test=test,fw[0],fw[1],fw[1],fw[2],fw[2],fw[3],fw[3],fw[4],fw[5],fw[6])
-fw = [0.6, 0.32935, 0.56515, 0.2670, 22, 52, 0.51785]
+pred=runSolution(testing,train,test,numSquares,fw[0],fw[1],fw[2],fw[3],fw[4],fw[5],fw[6],fw[7],fw[8],fw[9])
+
 
 if not testing:
     prepareSubmission(pred)
 else:
     print(pred)
-f=functools.partial(runSolution,testing=True,train=train,test=test)
+    
+uuid_string = str(uuid.uuid4())
+f=functools.partial(runSolution,testing=True,train=train,test=test,numSquares=numSquares,y_w=1000)
 bo = BayesianOptimization(f=f,
                                   pbounds={
                                       'acc_w': (0, 1),
@@ -330,11 +379,23 @@ bo = BayesianOptimization(f=f,
                                       "weekdaysin_w": (0, 0.4),
                                       "weekdaycos_w": (0, 0.4),
                                       "x_w": (18, 24),
-                                      "y_w": (36, 49),
+                                      
                                       "year_w": (0.4, 0.6),
                                       },
                                   verbose=True
                                   )
-bo.maximize(init_points=2, n_iter=8, acq="ei", xi=0.1)#0,1 prefer exploration
-with open(os.path.join('knn_params/{}.json'.format(uuid_string)), 'w+') as fh:
+                                  
+###########################################################################
+bo.maximize(init_points=2, n_iter=300, acq="ei", xi=0.1)#0,1 prefer exploration
+with open('{}.json'.format(uuid_string), 'w+') as fh:
                 fh.write(json.dumps(bo.res, sort_keys=True, indent=4))
+                
+#            "acc_w": 0.29209822227034421, 
+#            "daycos_w": 0.11289772305236952, 
+#            "daysin_w": 0.15996474153179779, 
+ #           "mincos_w": 0.65696391131311438, 
+##            "minsin_w": 0.63163291444080993, 
+ #           "weekdaycos_w": 0.3482234919523709, 
+#            "weekdaysin_w": 0.1518802052962232, 
+#            "x_w": 22.871375729836014, 
+#            "year_w": 0.45333037025748968
